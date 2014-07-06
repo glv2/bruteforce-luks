@@ -1,11 +1,11 @@
-bruteforce-wallet
-=================
+bruteforce-luks
+===============
 
-The purpose of this program is to try to find the password of an encrypted
-Peercoin (or Bitcoin, Litecoin, etc...) wallet file (i.e.: wallet.dat).
+The purpose of this program is to try to find the password of a LUKS
+encrypted volume.
 
-The program tries to decrypt one of the encrypted addresses in the wallet by
-trying all the possible passwords.
+The program tries to decrypt at least one of the key slots by trying
+all the possible passwords.
 The minimum and maximum password length to try can be indicated as option
 on the command line.
 The beginning and the end of the password can be specified too.
@@ -15,29 +15,21 @@ to use.
 
 ## Dependencies
 
-The program requires the OpenSSL and BerkeleyDB libraries.
-
-
-## Limitations
-
-Different versions of BerkeleyDB are usually not compatible with each other.
-Therefore, for the program to work, you will have to check that the BerkeleyDB
-version you are using can read the databases created by the BerkeleyDB version
-your wallet was created with.
+The program requires the cryptsetup library.
 
 
 ## Examples
 
-Try to find the password of an encrypted wallet file using 4 threads, trying
+Try to find the password of a LUKS encrypted volume using 4 threads, trying
 only passwords with 5 characters:
 
-    bruteforce-wallet -t 4 -l 5 -m 5 wallet.dat
+    bruteforce-luks -t 4 -l 5 -m 5 /dev/sdb1
 
 
-Try to find the password of an encrypted wallet file using 8 threads, trying
+Try to find the password of a LUKS encrypted volume using 8 threads, trying
 only passwords with 5 to 10 characters beginning with "W4l" and ending with "z":
 
-    bruteforce-wallet -t 8 -l 5 -m 10 -b "W4l" -e "z" wallet.dat
+    bruteforce-luks -t 8 -l 5 -m 10 -b "W4l" -e "z" /dev/sda2
 
 
 ## Donations

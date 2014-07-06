@@ -5,7 +5,7 @@ EAPI="5"
 
 inherit eutils autotools
 
-DESCRIPTION="A bruteforce cracker for Peercoin (and Bitcoin, Litecoin, etc...) encrypted wallet files."
+DESCRIPTION="A bruteforce cracker for LUKS encrypted volumes."
 HOMEPAGE="https://github.com/glv2/${PN}"
 SRC_URI="https://github.com/glv2/${PN}/archive/${PV}.tar.gz -> ${P}.tar.gz"
 
@@ -14,8 +14,7 @@ SLOT="0"
 KEYWORDS="~amd64 ~arm ~x86"
 
 DEPEND="
-	dev-libs/openssl
-	sys-libs/db
+	sys-fs/cryptsetup
 "
 RDEPEND="${DEPEND}"
 

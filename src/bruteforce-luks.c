@@ -1,5 +1,5 @@
 /*
-Bruteforce a wallet file.
+Bruteforce a LUKS volume.
 
 Copyright 2014 Guillaume LE VAILLANT
 
@@ -17,26 +17,20 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <ctype.h>
-#include <db.h>
-#include <openssl/evp.h>
+#include <errno.h>
+#include <libcryptsetup.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include "elliptic-curve.h"
 #include "version.h"
 
 
 unsigned char *default_charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-unsigned char *charset = NULL, *prefix = NULL, *suffix = NULL;
+unsigned char *charset = NULL, *prefix = NULL, *suffix = NULL, *path = NULL;
 unsigned int charset_len = 62, min_len = 1, max_len = 8, prefix_len = 0, suffix_len = 0;
-unsigned char *pubkey, *encrypted_seckey, *encrypted_masterkey, salt[8];
-unsigned int pubkey_len, encrypted_seckey_len, encrypted_masterkey_len, method, rounds;
-const EVP_CIPHER *cipher;
-const EVP_MD *digest;
 pthread_mutex_t found_password_lock;
 char stop = 0, only_one_password = 0;
 
@@ -45,62 +39,20 @@ char stop = 0, only_one_password = 0;
  * Decryption
  */
 
-void sha256(unsigned char *data, unsigned int len, unsigned char *hash)
-{
-  unsigned int size;
-  EVP_MD_CTX ctx;
-
-  EVP_DigestInit(&ctx, EVP_sha256());
-  EVP_DigestUpdate(&ctx, data, len);
-  EVP_DigestFinal(&ctx, hash, &size);
-  EVP_MD_CTX_cleanup(&ctx);
-}
-
-void sha256d(unsigned char *data, unsigned int len, unsigned char *hash)
-{
-  unsigned char hash1[32];
-  EVP_MD_CTX ctx;
-
-  sha256(data, len, hash1);
-  sha256(hash1, 32, hash);
-}
-
-int valid_seckey(unsigned char *seckey, unsigned int seckey_len, unsigned char *pubkey, unsigned int pubkey_len)
-{
-  int ret;
-
-  if(seckey_len != 32)
-    return(0);
-
-  ret = check_eckey(seckey, pubkey, pubkey_len);
-
-  return(ret);
-}
-
 /* The decryption_func thread function tests all the passwords of the form:
  *   prefix + x + combination + suffix
  * where x is a character in the range charset[arg[0]] -> charset[arg[1]]. */
 void * decryption_func(void *arg)
 {
-  unsigned char *password, *key, *iv, *masterkey, *seckey, hash[32];
+  unsigned char *password, device_name[64];
   unsigned int password_len, index_start, index_end, len, i, j, k;
-  unsigned int masterkey_len1, masterkey_len2, seckey_len1, seckey_len2;
   int ret;
   unsigned int *tab;
-  EVP_CIPHER_CTX ctx;
+  struct crypt_device *cd;
 
   index_start = ((unsigned int *) arg)[0];
   index_end = ((unsigned int *) arg)[1];
-  sha256d(pubkey, pubkey_len, hash);
-  key = (unsigned char *) malloc(EVP_CIPHER_key_length(cipher));
-  iv = (unsigned char *) malloc(EVP_CIPHER_iv_length(cipher));
-  masterkey = (unsigned char *) malloc(encrypted_masterkey_len + EVP_CIPHER_block_size(cipher));
-  seckey = (unsigned char *) malloc(encrypted_seckey_len + EVP_CIPHER_block_size(cipher));
-  if((key == NULL) || (iv == NULL) || (masterkey == NULL) || (seckey == NULL))
-    {
-      fprintf(stderr, "Error: memory allocation failed.\n\n");
-      exit(EXIT_FAILURE);
-    }
+  snprintf(device_name, sizeof(device_name), "luks_%u", index_start);
 
   /* For every possible length */
   for(len = min_len - prefix_len - 1 - suffix_len; len + 1 <= max_len - prefix_len - suffix_len; len++)
@@ -130,29 +82,23 @@ void * decryption_func(void *arg)
               for(i = 0; i < len; i++)
                 password[prefix_len + 1 + i] = charset[tab[len - 1 - i]];
 
-              /* Decrypt the master key with the password */
-              EVP_BytesToKey(cipher, digest, salt, password, password_len, rounds, key, iv);
-              EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), key, iv);
-              EVP_DecryptUpdate(&ctx, masterkey, &masterkey_len1, encrypted_masterkey, encrypted_masterkey_len);
-              ret = EVP_DecryptFinal(&ctx, masterkey + masterkey_len1, &masterkey_len2);
-              if(ret == 1)
+              /* Decrypt the LUKS volume with the password */
+              crypt_init(&cd, path);
+              crypt_load(cd, CRYPT_LUKS1, NULL);
+              ret = crypt_activate_by_passphrase(cd, device_name, CRYPT_ANY_SLOT, password, password_len, CRYPT_ACTIVATE_READONLY);
+              /* Note: If the password works but the LUKS volume is already mounted,
+                 the crypt_activate_by_passphrase function should return -EBUSY. */
+              if((ret >= 0) || (ret == -EBUSY))
                 {
-                  /* Decrypt the secret key with the master key */
-                  EVP_CIPHER_CTX_cleanup(&ctx);
-                  EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), masterkey, hash);
-                  EVP_DecryptUpdate(&ctx, seckey, &seckey_len1, encrypted_seckey, encrypted_seckey_len);
-                  ret = EVP_DecryptFinal(&ctx, seckey + seckey_len1, &seckey_len2);
-                  if((ret == 1) && valid_seckey(seckey, seckey_len1 + seckey_len2, pubkey, pubkey_len))
-                    {
-                      /* We have a positive result */
-                      pthread_mutex_lock(&found_password_lock);
-                      printf("Password candidate: %s\n", password);
-                      if(only_one_password)
-                        stop = 1;
-                      pthread_mutex_unlock(&found_password_lock);
-                    }
+                  /* We have a positive result */
+                  pthread_mutex_lock(&found_password_lock);
+                  printf("Password candidate: %s\n", password);
+                  crypt_deactivate(cd, device_name);
+                  if(only_one_password)
+                    stop = 1;
+                  pthread_mutex_unlock(&found_password_lock);
                 }
-              EVP_CIPHER_CTX_cleanup(&ctx);
+              crypt_free(cd);
 
               if(len == 0)
                 break;
@@ -173,112 +119,32 @@ void * decryption_func(void *arg)
         }
     }
 
-  free(masterkey);
-  free(seckey);
-  free(iv);
-  free(key);
-
   pthread_exit(NULL);
 }
 
 
 /*
- * Database
+ * Check path
  */
 
-int get_wallet_info(char *filename)
+int check_path(char *path)
 {
-  DB *db;
-  DBC *db_cursor;
-  DBT db_key, db_data;
-  int ret, mkey = 0, ckey = 0;
+  struct crypt_device *cd;
+  int ret;
 
-  /* Open the BerkeleyDB database file */
-  ret = db_create(&db, NULL, 0);
-  if(ret != 0)
+  ret = crypt_init(&cd, path);
+  if(ret < 0)
+    return(0);
+
+  ret = crypt_load(cd, CRYPT_LUKS1, NULL);
+  if(ret < 0)
     {
-      fprintf(stderr, "Error: db_create: %s.\n\n", db_strerror(ret));
-      exit(EXIT_FAILURE);
+      crypt_free(cd);
+      return(0);
     }
 
-  ret = db->open(db, NULL, filename, "main", DB_UNKNOWN, DB_RDONLY, 0);
-  if(ret != 0)
-    {
-      db->err(db, ret, "Error: %s.\n\n", filename);
-      db->close(db, 0);
-      exit(EXIT_FAILURE);
-    }
-
-  ret = db->cursor(db, NULL, &db_cursor, 0);
-  if(ret != 0)
-    {
-      db->err(db, ret, "Error: %s.\n\n", filename);
-      db->close(db, 0);
-      exit(EXIT_FAILURE);
-    }
-
-  memset(&db_key, 0, sizeof(db_key));
-  memset(&db_data, 0, sizeof(db_data));
-  while((ret = db_cursor->get(db_cursor, &db_key, &db_data, DB_NEXT)) == 0)
-    {
-      /* Find the encrypted master key */
-      if(!mkey && (db_key.size > 7) && (memcmp(db_key.data + 1, "mkey", 4) == 0))
-        {
-          mkey = 1;
-          encrypted_masterkey_len = ((unsigned char *) db_data.data)[0];
-          encrypted_masterkey = (unsigned char *) malloc(encrypted_masterkey_len);
-          if(encrypted_masterkey == NULL)
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-
-          memcpy(encrypted_masterkey, db_data.data + 1, encrypted_masterkey_len);
-          memcpy(salt, db_data.data + 1 + encrypted_masterkey_len + 1, 8);
-          method = *((unsigned int *) (db_data.data + 1 + encrypted_masterkey_len + 1 + 8));
-          rounds = *((unsigned int *) (db_data.data + 1 + encrypted_masterkey_len + 1 + 8 + 4));
-        }
-
-      /* Find an encrypted secret key */
-      if(!ckey && (db_key.size > 7) && (memcmp(db_key.data + 1, "ckey", 4) == 0))
-        {
-          ckey = 1;
-          pubkey_len = ((unsigned char *) db_key.data)[5];
-          pubkey = (unsigned char *) malloc(pubkey_len);
-          encrypted_seckey_len = ((unsigned char *) db_data.data)[0];
-          encrypted_seckey = (unsigned char *) malloc(encrypted_seckey_len);
-          if((pubkey == NULL) || (encrypted_seckey == NULL))
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-
-          memcpy(pubkey, db_key.data + 6, pubkey_len);
-          memcpy(encrypted_seckey, db_data.data + 1, encrypted_seckey_len);
-        }
-
-      if(mkey && ckey)
-        {
-          if(method == 0)
-            {
-              cipher = EVP_aes_256_cbc();
-              digest = EVP_sha512();
-            }
-          else
-            {
-              fprintf(stderr, "Error: encryption method not supported: %u.\n\n", method);
-              exit(EXIT_FAILURE);
-            }
-
-          db_cursor->close(db_cursor);
-          db->close(db, 0);
-          return(1);
-        }
-    }
-
-  db_cursor->close(db_cursor);
-  db->close(db, 0);
-  return(0);
+  crypt_free(cd);
+  return(1);
 }
 
 
@@ -288,8 +154,8 @@ int get_wallet_info(char *filename)
 
 void usage(char *progname)
 {
-  fprintf(stderr, "\nbruteforce-wallet %s\n\n", VERSION_NUMBER);
-  fprintf(stderr, "Usage: %s [options] <filename>\n\n", progname);
+  fprintf(stderr, "\nbruteforce-luks %s\n\n", VERSION_NUMBER);
+  fprintf(stderr, "Usage: %s [options] <path>\n\n", progname);
   fprintf(stderr, "Options:\n");
   fprintf(stderr, "  -1           Stop the program after finding the first password candidate.\n");
   fprintf(stderr, "  -b <string>  Beginning of the password.\n");
@@ -313,11 +179,8 @@ int main(int argc, char **argv)
 {
   unsigned int nb_threads = 1;
   pthread_t *decryption_threads;
-  char *filename;
   unsigned int **indexes;
   int i, ret, c;
-
-  OpenSSL_add_all_algorithms();
 
   /* Get options and parameters. */
   opterr = 0;
@@ -383,11 +246,11 @@ int main(int argc, char **argv)
   if(optind >= argc)
     {
       usage(argv[0]);
-      fprintf(stderr, "Error: missing filename.\n\n");
+      fprintf(stderr, "Error: missing path.\n\n");
       exit(EXIT_FAILURE);
     }
 
-  filename = argv[optind];
+  path = argv[optind];
 
   /* Check variables */
   if(prefix == NULL)
@@ -420,11 +283,11 @@ int main(int argc, char **argv)
       max_len = min_len;
     }
 
-  /* Get data from the encrypted wallet */
-  ret = get_wallet_info(filename);
+  /* Check if path points to a LUKS volume */
+  ret = check_path(path);
   if(ret == 0)
     {
-      fprintf(stderr, "Error: couldn't find required info in wallet.\n\n");
+      fprintf(stderr, "Error: %s is not a valid LUKS volume.\n\n", path);
       exit(EXIT_FAILURE);
     }
 
@@ -467,10 +330,6 @@ int main(int argc, char **argv)
   free(indexes);
   free(decryption_threads);
   pthread_mutex_destroy(&found_password_lock);
-  free(encrypted_masterkey);
-  free(encrypted_seckey);
-  free(pubkey);
-  EVP_cleanup();
 
   exit(EXIT_SUCCESS);
 }
