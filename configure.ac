@@ -1,4 +1,4 @@
-AC_INIT(bruteforce_luks, 1.0)
+AC_INIT(bruteforce_luks, 1.1)
 AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR(src/bruteforce-luks.c)
 
@@ -7,16 +7,20 @@ AC_PROG_CC
 AC_PROG_INSTALL
 
 dnl Check for standard headers
-AC_CHECK_HEADERS([errno.h stdio.h stdlib.h string.h unistd.h])
+AC_CHECK_HEADERS([errno.h locale.h math.h signal.h stdio.h stdlib.h unistd.h wchar.h])
 
 dnl Check for functions
-AC_CHECK_FUNCS([malloc free])
+AC_CHECK_FUNCS([calloc malloc realloc free])
 AC_CHECK_FUNCS([perror printf fprintf snprintf])
+AC_CHECK_FUNCS([fopen fgetc])
 AC_CHECK_FUNCS([atoi])
-AC_CHECK_FUNCS([strlen strncpy])
+AC_CHECK_FUNCS([setlocale mbstowcs wcsncpy wcstombs])
 AC_CHECK_FUNCS([getopt])
+AC_CHECK_FUNCS([signal])
 
 dnl Check for libraries
+AC_CHECK_LIB(m, pow, [], AC_MSG_ERROR([math library required]))
+
 AC_CHECK_LIB(pthread, pthread_create, [], AC_MSG_ERROR([POSIX threads library required]))
 AC_CHECK_HEADERS(pthread.h, [], AC_MSG_ERROR([POSIX threads headers required]))
 

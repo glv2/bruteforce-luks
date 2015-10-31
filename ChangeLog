@@ -1,2 +1,8 @@
+2015-10-31 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
+	Version 1.1
+	Print progress info when sending a USR1 signal to the process.
+	Support all the characters of the current locale (e.g. utf-8).
+	Add the possibility to get the passwords from a file.
+
 2014-07-06 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
 	Version 1.0
