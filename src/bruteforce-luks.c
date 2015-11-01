@@ -128,6 +128,7 @@ void * decryption_func_bruteforce(void *arg)
                 }
               crypt_free(cd);
 
+              dfargs->counter++;
               free(pwd);
 
               if(len == 0)
@@ -143,7 +144,6 @@ void * decryption_func_bruteforce(void *arg)
                   if(tab[j] == charset_len)
                     tab[j] = 0;
                 }
-              dfargs->counter++;
             }
           free(tab);
           free(password);
