@@ -38,7 +38,7 @@ wchar_t *charset = NULL, *prefix = NULL, *suffix = NULL;
 unsigned int charset_len, min_len = 1, max_len = 8, prefix_len = 0, suffix_len = 0;
 FILE *dictionary = NULL;
 pthread_mutex_t found_password_lock, dictionary_lock;
-char stop = 0;
+char stop = 0, found_password = 0;
 unsigned int nb_threads = 1;
 struct decryption_func_locals
 {
@@ -46,6 +46,31 @@ struct decryption_func_locals
   unsigned int index_end;
   unsigned long long int counter;
 } *thread_locals;
+
+
+/*
+ * Statistics
+ */
+
+void handle_signal(int signo)
+{
+  unsigned long long int total_ops = 0;
+  unsigned int i, l;
+  unsigned int l_full = max_len - suffix_len - prefix_len;
+  unsigned int l_skip = min_len - suffix_len - prefix_len;
+  double space = 0;
+
+  if(dictionary == NULL)
+    for(l = l_skip; l <= l_full; l++)
+      space += pow(charset_len, l);
+
+  for(i = 0; i < nb_threads; i++)
+    total_ops += thread_locals[i].counter;
+
+  fprintf(stderr, "Tried passwords: %llu\n", total_ops);
+  if(dictionary == NULL)
+    fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
+}
 
 
 /*
@@ -110,12 +135,15 @@ void * decryption_func_bruteforce(void *arg)
               crypt_init(&cd, path);
               crypt_load(cd, CRYPT_LUKS1, NULL);
               ret = crypt_activate_by_passphrase(cd, device_name, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
+              dfargs->counter++;
               /* Note: If the password works but the LUKS volume is already mounted,
                  the crypt_activate_by_passphrase function should return -EBUSY. */
               if((ret >= 0) || (ret == -EBUSY))
                 {
                   /* We have a positive result */
+                  handle_signal(SIGUSR1); /* Print some stats */
                   pthread_mutex_lock(&found_password_lock);
+                  found_password = 1;
                   printf("Password found: %ls\n", password);
                   crypt_deactivate(cd, device_name);
                   stop = 1;
@@ -128,7 +156,6 @@ void * decryption_func_bruteforce(void *arg)
                 }
               crypt_free(cd);
 
-              dfargs->counter++;
               free(pwd);
 
               if(len == 0)
@@ -234,12 +261,15 @@ void * decryption_func_dictionary(void *arg)
       crypt_init(&cd, path);
       crypt_load(cd, CRYPT_LUKS1, NULL);
       ret = crypt_activate_by_passphrase(cd, device_name, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
+      dfargs->counter++;
       /* Note: If the password works but the LUKS volume is already mounted,
          the crypt_activate_by_passphrase function should return -EBUSY. */
       if((ret >= 0) || (ret == -EBUSY))
         {
           /* We have a positive result */
+          handle_signal(SIGUSR1); /* Print some stats */
           pthread_mutex_lock(&found_password_lock);
+          found_password = 1;
           printf("Password found: %s\n", pwd);
           crypt_deactivate(cd, device_name);
           stop = 1;
@@ -252,7 +282,6 @@ void * decryption_func_dictionary(void *arg)
         }
       crypt_free(cd);
 
-      dfargs->counter++;
       free(pwd);
     }
   while(stop == 0);
@@ -283,31 +312,6 @@ int check_path(char *path)
 
   crypt_free(cd);
   return(1);
-}
-
-
-/*
- * Statistics
- */
-
-void handle_signal(int signo)
-{
-  unsigned long long int total_ops = 0;
-  unsigned int i, l;
-  unsigned int l_full = max_len - suffix_len - prefix_len;
-  unsigned int l_skip = min_len - suffix_len - prefix_len;
-  double space = 0;
-
-  if(dictionary == NULL)
-    for(l = l_skip; l <= l_full; l++)
-      space += pow(charset_len, l);
-
-  for(i = 0; i < nb_threads; i++)
-    total_ops += thread_locals[i].counter;
-
-  fprintf(stderr, "Tried passwords: %llu\n", total_ops);
-  if(dictionary == NULL)
-    fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
 }
 
 
@@ -569,6 +573,11 @@ int main(int argc, char **argv)
   for(i = 0; i < nb_threads; i++)
     {
       pthread_join(decryption_threads[i], NULL);
+    }
+  if(found_password == 0)
+    {
+      handle_signal(SIGUSR1); /* Print some stats */
+      fprintf(stderr, "Password not found\n");
     }
   free(thread_locals);
   free(decryption_threads);
