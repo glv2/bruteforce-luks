@@ -1,3 +1,13 @@
+Version 1.2
+  2016-01-08
+  Root privileges are not required anymore because cryptsetup is called in
+  dry-run mode which does not actually change device mapper configuration.
+
+  This should work under non-root user as long as the user can access the
+  device. You can e.g. copy LUKS header to a file and run the cracker on
+  this file.
+  $ dd if=/dev/source of=/tmp/luks-header bs=1M count=10
+
 Version 1.1
   2015-10-31
 
