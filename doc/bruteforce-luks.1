@@ -1,120 +1,104 @@
-.TH BRUTEFORCE-LUKS "1" "Nov 2015" "BRUTEFORCE-LUKS 1.1" "Bruteforce LUKS encrypted volume"
+.TH BRUTEFORCE-LUKS "1" "January 2016" "BRUTEFORCE-LUKS 1.2.0" "Bruteforce LUKS encrypted volume"
 .SH NAME
-bruteforce-luks \- try to find the password of a LUKS volume
+bruteforce-luks - try to find the password of a LUKS volume
 .SH SYNOPSIS
-\fBbruteforce-luks\fP [\fBoptions\fP] <\fIpath to LUKS volume\fP>
+.B bruteforce-luks [options]
+.I <path to LUKS volume>
 .SH DESCRIPTION
-The program tries to decrypt at least one of the key slots by trying
-all the possible passwords. It is especially useful if you know
-something about the password (i.e. you forgot a part of your password but still
-remember most of it). Finding the password of a volume without knowing
-anything about it would take way too much time (unless the password is really
-short and/or weak).
-.PP
-There are command line options to specify:
+The purpose of this program is to try to find the password of a LUKS
+encrypted volume.
+.P
+It can be used in two ways:
 .RS
-.IP \(bu 2
-the minimum password length to try
-.IP \(bu 2
-the maximum password length to try
-.IP \(bu 2
-the beginning of the password
-.IP \(bu 2
-the end of the password
-.IP \(bu 2
-the character set to use (among the characters of the current locale)
+.P
+\(bu brute force attack: try all the possible passwords given a character set.
+It is especially useful if you know something about the password (i.e. you
+forgot a part of your password but still remember most of it). Finding the
+password of a volume without knowing anything about it would take way too much
+time (unless the password is really short and/or weak).
+.P
+\(bu dictionary attack: try all the passwords in a file.
+.RE
+.P
+The program can use several threads (the number of threads can be specified
+with the
+.I -t
+command line option).
+.P
+Sending a USR1 signal to a running
+.B bruteforce-luks
+process makes it print progress info to standard error and continue.
 .SH OPTIONS
-.TP
-.B \-b <string>
 .nf
+.TP
+.B -b <string>
 Beginning of the password.
-.nf
 Default: ""
 .TP
-.B \-e <string>
-.nf
+.B -e <string>
 End of the password.
-.nf
 Default: ""
 .TP
-.B \-f <file>
-.nf
+.B -f <file>
 Read the passwords from a file instead of generating them.
 .TP
-.B \-h
-.nf
+.B -h
 Show help and quit.
 .TP
-.B \-l <length>
-.nf
+.B -l <length>
 Minimum password length (beginning and end included).
-.nf
 Default: 1
 .TP
-.B \-m <length>
-.nf
+.B -m <length>
 Maximum password length (beginning and end included).
-.nf
 Default: 8
 .TP
-.B \-s <string>
-.nf
+.B -s <string>
 Password character set.
-.nf
 Default: "0123456789ABCDEFGHIJKLMNOPQRSTU
           VWXYZabcdefghijklmnopqrstuvwxyz"
 .TP
-.B \-t <n>
-.nf
+.B -t <n>
 Number of threads to use.
-.nf
 Default: 1
-.PP
-Sending a USR1 signal to a running \fBbruteforce-luks\fP process
-makes it print progress info to standard error and continue.
 .SH EXAMPLES
 Try to find the password of a LUKS encrypted volume using 4 threads, trying
 only passwords with 5 characters:
-.PP
+.sp
 .nf
-.fam C
     bruteforce-luks -t 4 -l 5 -m 5 /dev/sdb1
-
-
-.fam T
+.P
 .fi
 Try to find the password of a LUKS encrypted volume using 8 threads, trying
 only passwords with 5 to 10 characters beginning with "W4l" and ending with "z":
-.PP
+.sp
 .nf
-.fam C
     bruteforce-luks -t 8 -l 5 -m 10 -b "W4l" -e "z" /dev/sda2
-
-
-.fam T
+.P
 .fi
 Try to find the password of a LUKS encrypted volume using 8 threads, trying
 only passwords with 10 characters using the character set "P情8ŭ":
-.PP
+.sp
 .nf
-.fam C
     bruteforce-luks -t 8 -l 10 -m 10 -s "P情8ŭ" /dev/sdc3
-
-
-.fam T
+.P
 .fi
 Try to find the password of a LUKS encrypted volume using 6 threads, trying
 the passwords contained in a dictionary file:
-.PP
+.sp
 .nf
-.fam C
     bruteforce-luks -t 6 -f dictionary.txt /dev/sdd1
-
-
-.fam T
+.P
+.fi
+Instead of passing a block device to the program, you can copy the beginning
+of the LUKS volume to a file and pass this file to the program:
+.sp
+.nf
+    sudo dd if=/dev/sda1 of=/tmp/luks-header bs=1M count=10
+    bruteforce-luks -t 4 -l 5 -m 5 /tmp/luks-header
+.P
 .fi
 Print progress info:
-.PP
+.sp
 .nf
-.fam C
     pkill -USR1 -f bruteforce-luks

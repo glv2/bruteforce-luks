@@ -1,7 +1,7 @@
 /*
 Bruteforce a LUKS volume.
 
-Copyright 2014-2015 Guillaume LE VAILLANT
+Copyright 2014-2016 Guillaume LE VAILLANT
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -94,6 +94,10 @@ void * decryption_func_bruteforce(void *arg)
   index_start = dfargs->index_start;
   index_end = dfargs->index_end;
 
+  /* Load the LUKS volume header */
+  crypt_init(&cd, path);
+  crypt_load(cd, CRYPT_LUKS1, NULL);
+
   /* For every possible length */
   for(len = min_len - prefix_len - 1 - suffix_len; len + 1 <= max_len - prefix_len - suffix_len; len++)
     {
@@ -131,8 +135,6 @@ void * decryption_func_bruteforce(void *arg)
               wcstombs(pwd, password, pwd_len + 1);
 
               /* Decrypt the LUKS volume with the password */
-              crypt_init(&cd, path);
-              crypt_load(cd, CRYPT_LUKS1, NULL);
               ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
               dfargs->counter++;
               if(ret >= 0)
@@ -150,7 +152,6 @@ void * decryption_func_bruteforce(void *arg)
                   fprintf(stderr, "Error: access to the LUKS volume denied.\n\n");
                   stop = 1;
                 }
-              crypt_free(cd);
 
               free(pwd);
 
@@ -172,6 +173,8 @@ void * decryption_func_bruteforce(void *arg)
           free(password);
         }
     }
+
+  crypt_free(cd);
 
   pthread_exit(NULL);
 }
@@ -246,6 +249,10 @@ void * decryption_func_dictionary(void *arg)
 
   dfargs = (struct decryption_func_locals *) arg;
 
+  /* Load the LUKS volume header */
+  crypt_init(&cd, path);
+  crypt_load(cd, CRYPT_LUKS1, NULL);
+
   do
     {
       ret = read_dictionary_line(&pwd, &pwd_len);
@@ -253,8 +260,6 @@ void * decryption_func_dictionary(void *arg)
         break;
 
       /* Decrypt the LUKS volume with the password */
-      crypt_init(&cd, path);
-      crypt_load(cd, CRYPT_LUKS1, NULL);
       ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
       dfargs->counter++;
       if(ret >= 0)
@@ -272,11 +277,12 @@ void * decryption_func_dictionary(void *arg)
           fprintf(stderr, "Error: access to the LUKS volume denied.\n\n");
           stop = 1;
         }
-      crypt_free(cd);
 
       free(pwd);
     }
   while(stop == 0);
+
+  crypt_free(cd);
 
   pthread_exit(NULL);
 }
@@ -524,7 +530,7 @@ int main(int argc, char **argv)
   ret = check_path(path);
   if(ret == 0)
     {
-      fprintf(stderr, "Error: %s is not a valid LUKS volume.\n\n", path);
+      fprintf(stderr, "Error: either %s is not a valid LUKS volume, or you don't have permission to access it.\n\n", path);
       exit(EXIT_FAILURE);
     }
 

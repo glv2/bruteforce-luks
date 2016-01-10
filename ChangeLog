@@ -1,3 +1,7 @@
+2016-01-10 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
+	Version 1.2.0
+	Root privileges are not required anymore.
+
 2015-10-31 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
 	Version 1.1
 	Print progress info when sending a USR1 signal to the process.

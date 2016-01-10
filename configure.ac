@@ -1,4 +1,4 @@
-AC_INIT(bruteforce_luks, 1.2)
+AC_INIT(bruteforce_luks, 1.2.0)
 AM_INIT_AUTOMAKE
 AC_CONFIG_SRCDIR(src/bruteforce-luks.c)
 

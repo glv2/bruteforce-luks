@@ -70,6 +70,13 @@ the passwords contained in a dictionary file:
     bruteforce-luks -t 6 -f dictionary.txt /dev/sdd1
 
 
+Instead of passing a block device to the program, you can copy the beginning
+of the LUKS volume to a file and pass this file to the program:
+
+    sudo dd if=/dev/sda1 of=/tmp/luks-header bs=1M count=10
+    bruteforce-luks -t 4 -l 5 -m 5 /tmp/luks-header
+
+
 Print progress info:
 
     pkill -USR1 -f bruteforce-luks
