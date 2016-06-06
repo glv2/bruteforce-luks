@@ -1,3 +1,7 @@
+Version 1.2.1
+  2016-06-06
+  Fix mutex for dictionary mode.
+
 Version 1.2.0
   2016-01-08
   Root privileges are not required anymore because cryptsetup is called in

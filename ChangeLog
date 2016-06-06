@@ -1,3 +1,7 @@
+2016-06-06 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
+	Version 1.2.1
+	Fix mutex for dictionary mode.
+
 2016-01-10 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
 	Version 1.2.0
 	Root privileges are not required anymore.

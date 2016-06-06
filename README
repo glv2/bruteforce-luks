@@ -9,7 +9,7 @@ It can be used in two ways:
  - try all the possible passwords given a charset
  - try all the passwords in a file
 
-There is a command line option to specify the  number of threads to use.
+There is a command line option to specify the number of threads to use.
 
 Sending a USR1 signal to a running bruteforce-luks process makes it print
 progress and continue.
