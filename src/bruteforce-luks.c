@@ -40,6 +40,7 @@ FILE *dictionary = NULL;
 pthread_mutex_t found_password_lock, dictionary_lock;
 char stop = 0, found_password = 0;
 unsigned int nb_threads = 1;
+unsigned char *last_pass;
 struct decryption_func_locals
 {
   unsigned int index_start;
@@ -68,6 +69,7 @@ void handle_signal(int signo)
     total_ops += thread_locals[i].counter;
 
   fprintf(stderr, "Tried passwords: %llu\n", total_ops);
+  fprintf(stderr, "Last tried password: %s\n", last_pass);
   if(dictionary == NULL)
     fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
 }
@@ -132,6 +134,7 @@ void * decryption_func_bruteforce(void *arg)
                   fprintf(stderr, "Error: memory allocation failed.\n\n");
                   exit(EXIT_FAILURE);
                 }
+              last_pass = pwd;
               wcstombs(pwd, password, pwd_len + 1);
 
               /* Decrypt the LUKS volume with the password */
