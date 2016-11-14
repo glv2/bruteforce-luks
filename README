@@ -46,6 +46,13 @@ The program requires the cryptsetup library.
 
 ## Compilation
 
+Install the dependencies. For example on a GNU/Linux Debian-like system, enter
+the commands:
+
+    sudo apt-get install dh-autoreconf
+    sudo apt-get install libcryptsetup-dev
+
+
 If you are building from the raw sources, you must first generate the
 configuration script:
 
