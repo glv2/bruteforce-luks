@@ -1,3 +1,7 @@
+2016-11-27 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
+	Version 1.2.2
+	Add bruteforcing speed and last tried password to progress info.
+
 2016-06-06 Guillaume LE VAILLANT <guillaume.le.vaillant@openmailbox.org>
 	Version 1.2.1
 	Fix mutex for dictionary mode.

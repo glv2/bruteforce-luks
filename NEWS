@@ -1,3 +1,7 @@
+Version 1.2.2
+  2016-11-27
+  Add bruteforcing speed and last tried password to progress info.
+
 Version 1.2.1
   2016-06-06
   Fix mutex for dictionary mode.
