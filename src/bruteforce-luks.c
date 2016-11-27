@@ -32,6 +32,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "version.h"
 
 
+#define LAST_PASS_MAX_SHOWN_LENGTH 256
+
 unsigned char *default_charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 unsigned char *path = NULL;
 wchar_t *charset = NULL, *prefix = NULL, *suffix = NULL;
@@ -40,7 +42,7 @@ FILE *dictionary = NULL;
 pthread_mutex_t found_password_lock, dictionary_lock;
 char stop = 0, found_password = 0;
 unsigned int nb_threads = 1;
-unsigned char *last_pass;
+unsigned char last_pass[LAST_PASS_MAX_SHOWN_LENGTH];
 struct decryption_func_locals
 {
   unsigned int index_start;
@@ -134,8 +136,8 @@ void * decryption_func_bruteforce(void *arg)
                   fprintf(stderr, "Error: memory allocation failed.\n\n");
                   exit(EXIT_FAILURE);
                 }
-              last_pass = pwd;
               wcstombs(pwd, password, pwd_len + 1);
+              snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", pwd);
 
               /* Decrypt the LUKS volume with the password */
               ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
@@ -262,6 +264,7 @@ void * decryption_func_dictionary(void *arg)
       ret = read_dictionary_line(&pwd, &pwd_len);
       if(ret == 0)
         break;
+      snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", pwd);
 
       /* Decrypt the LUKS volume with the password */
       ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
@@ -528,6 +531,7 @@ int main(int argc, char **argv)
         }
     }
 
+  last_pass[0] = '\0';
   signal(SIGUSR1, handle_signal);
 
   /* Check if path points to a LUKS volume */
