@@ -64,22 +64,35 @@ void handle_signal(int signo)
   unsigned int l_full = max_len - suffix_len - prefix_len;
   unsigned int l_skip = min_len - suffix_len - prefix_len;
   double space = 0;
-  time_t current_time;
+  double pw_per_seconds;
+  time_t current_time, eta_time;
 
   current_time = time(NULL);
-
-  if(dictionary == NULL)
-    for(l = l_skip; l <= l_full; l++)
-      space += pow(charset_len, l);
 
   for(i = 0; i < nb_threads; i++)
     total_ops += thread_locals[i].counter;
 
-  fprintf(stderr, "Tried passwords: %llu\n", total_ops);
-  fprintf(stderr, "Tried passwords per second: %lf\n", (double) total_ops / (current_time - start_time));
+  pw_per_seconds = (double) total_ops / (current_time - start_time);
+
+  if(dictionary == NULL)
+    {
+      for(l = l_skip; l <= l_full; l++)
+        space += pow(charset_len, l);
+
+      eta_time = ((space - total_ops) / pw_per_seconds) + start_time;
+    }
+
+  fprintf(stderr, "Tried / left passwords: %llu / %g\n", total_ops, space);
+  fprintf(stderr, "Tried passwords per second: %lf\n", pw_per_seconds);
   fprintf(stderr, "Last tried password: %s\n", last_pass);
   if(dictionary == NULL)
-    fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
+    {
+      fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
+      if(eta_time > 6307000000)
+        fprintf(stderr, "ETA: more than 200 years :(\n");
+      else 
+        fprintf(stderr, "ETA: %s\n", asctime(localtime(&eta_time)));
+    }
 }
 
 
