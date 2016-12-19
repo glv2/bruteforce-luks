@@ -66,6 +66,7 @@ void handle_signal(int signo)
   double space = 0;
   double pw_per_seconds;
   time_t current_time, eta_time;
+  char datestr[256];
 
   current_time = time(NULL);
 
@@ -82,17 +83,26 @@ void handle_signal(int signo)
       eta_time = ((space - total_ops) / pw_per_seconds) + start_time;
     }
 
-  fprintf(stderr, "Tried / left passwords: %llu / %g\n", total_ops, space);
+  if(dictionary == NULL)
+    fprintf(stderr, "Tried / Total passwords: %llu / %g\n", total_ops, space);
+  else
+    fprintf(stderr, "Tried passwords: %llu\n", total_ops);
   fprintf(stderr, "Tried passwords per second: %lf\n", pw_per_seconds);
   fprintf(stderr, "Last tried password: %s\n", last_pass);
   if(dictionary == NULL)
     {
       fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
       if(eta_time > 6307000000)
-        fprintf(stderr, "ETA: more than 200 years :(\n");
-      else 
-        fprintf(stderr, "ETA: %s\n", asctime(localtime(&eta_time)));
+        {
+          fprintf(stderr, "ETA: more than 200 years :(\n");
+        }
+      else
+        {
+          strftime(datestr, 256, "%c", localtime(&eta_time));
+          fprintf(stderr, "ETA: %s\n", datestr);
+        }
     }
+  fprintf(stderr, "\n");
 }
 
 
