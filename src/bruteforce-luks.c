@@ -1,7 +1,7 @@
 /*
 Bruteforce a LUKS volume.
 
-Copyright 2014-2016 Guillaume LE VAILLANT
+Copyright 2014-2017 Guillaume LE VAILLANT
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -40,15 +40,13 @@ unsigned char *path = NULL;
 wchar_t *charset = NULL, *prefix = NULL, *suffix = NULL;
 unsigned int charset_len, min_len = 1, max_len = 8, prefix_len = 0, suffix_len = 0;
 FILE *dictionary = NULL;
-pthread_mutex_t found_password_lock, dictionary_lock;
+pthread_mutex_t found_password_lock, get_password_lock;
 char stop = 0, found_password = 0;
 unsigned int nb_threads = 1;
 unsigned char last_pass[LAST_PASS_MAX_SHOWN_LENGTH];
 time_t start_time;
 struct decryption_func_locals
 {
-  unsigned int index_start;
-  unsigned int index_end;
   unsigned long long int counter;
 } *thread_locals;
 
@@ -76,12 +74,12 @@ void handle_signal(int signo)
   pw_per_seconds = (double) total_ops / (current_time - start_time);
 
   if(dictionary == NULL)
-    {
-      for(l = l_skip; l <= l_full; l++)
-        space += pow(charset_len, l);
+  {
+    for(l = l_skip; l <= l_full; l++)
+      space += pow(charset_len, l);
 
-      eta_time = ((space - total_ops) / pw_per_seconds) + start_time;
-    }
+    eta_time = ((space - total_ops) / pw_per_seconds) + start_time;
+  }
 
   if(dictionary == NULL)
     fprintf(stderr, "Tried / Total passwords: %llu / %g\n", total_ops, space);
@@ -90,19 +88,32 @@ void handle_signal(int signo)
   fprintf(stderr, "Tried passwords per second: %lf\n", pw_per_seconds);
   fprintf(stderr, "Last tried password: %s\n", last_pass);
   if(dictionary == NULL)
+  {
+    fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
+    if(eta_time > 6307000000)
     {
-      fprintf(stderr, "Total space searched: %lf%%\n", (total_ops / space) * 100);
-      if(eta_time > 6307000000)
-        {
-          fprintf(stderr, "ETA: more than 200 years :(\n");
-        }
-      else
-        {
-          strftime(datestr, 256, "%c", localtime(&eta_time));
-          fprintf(stderr, "ETA: %s\n", datestr);
-        }
+      fprintf(stderr, "ETA: more than 200 years :(\n");
     }
+    else
+    {
+      strftime(datestr, 256, "%c", localtime(&eta_time));
+      fprintf(stderr, "ETA: %s\n", datestr);
+    }
+  }
   fprintf(stderr, "\n");
+}
+
+
+/*
+ * Log function
+ */
+
+void logger(int level, const char *msg, void *usrptr)
+{
+  int *ret = (int *) usrptr;
+
+  if((level == CRYPT_LOG_ERROR) && (*ret < -1))
+    fprintf(stderr, "Error: %s\n", msg);
 }
 
 
@@ -110,107 +121,80 @@ void handle_signal(int signo)
  * Decryption
  */
 
-/* The decryption_func_bruteforce thread function tests all the passwords of the form:
- *   prefix + x + combination + suffix
- * where x is a character in the range charset[dfargs.index_start] -> charset[dfargs.index_end]. */
-void * decryption_func_bruteforce(void *arg)
+int generate_next_password(unsigned char **pwd, unsigned int *pwd_len)
 {
-  struct decryption_func_locals *dfargs;
   wchar_t *password;
-  unsigned char *pwd;
-  unsigned int password_len, pwd_len, index_start, index_end, len, i, j, k;
-  int ret;
-  unsigned int *tab;
-  struct crypt_device *cd;
+  unsigned int password_len, i;
+  static unsigned int len = 0;
+  static unsigned int *tab = NULL;
 
-  dfargs = (struct decryption_func_locals *) arg;
-  index_start = dfargs->index_start;
-  index_end = dfargs->index_end;
+  pthread_mutex_lock(&get_password_lock);
 
-  /* Load the LUKS volume header */
-  crypt_init(&cd, path);
-  crypt_load(cd, CRYPT_LUKS1, NULL);
+  if(len == 0)
+    len = min_len - prefix_len - suffix_len;
+  if(len > max_len - prefix_len - suffix_len)
+    return(0);
 
-  /* For every possible length */
-  for(len = min_len - prefix_len - 1 - suffix_len; len + 1 <= max_len - prefix_len - suffix_len; len++)
+  /* Initialize index table */
+  if(tab == NULL)
+  {
+    tab = (unsigned int *) calloc(len + 1, sizeof(unsigned int));
+    if(tab == NULL)
     {
-      /* For every first character in the range we were given */
-      for(k = index_start; k <= index_end; k++)
-        {
-          password_len = prefix_len + 1 + len + suffix_len;
-          password = (wchar_t *) calloc(password_len + 1, sizeof(wchar_t));
-          tab = (unsigned int *) calloc(len + 1, sizeof(unsigned int));
-          if((password == NULL) || (tab == NULL))
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-          wcsncpy(password, prefix, prefix_len);
-          password[prefix_len] = charset[k];
-          wcsncpy(password + prefix_len + 1 + len, suffix, suffix_len);
-          password[password_len] = '\0';
-
-          for(i = 0; i <= len; i++)
-            tab[i] = 0;
-
-          /* Test all the combinations */
-          while((tab[len] == 0) && (stop == 0))
-            {
-              for(i = 0; i < len; i++)
-                password[prefix_len + 1 + i] = charset[tab[len - 1 - i]];
-              pwd_len = wcstombs(NULL, password, 0);
-              pwd = (unsigned char *) malloc(pwd_len + 1);
-              if(pwd == NULL)
-                {
-                  fprintf(stderr, "Error: memory allocation failed.\n\n");
-                  exit(EXIT_FAILURE);
-                }
-              wcstombs(pwd, password, pwd_len + 1);
-              snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", pwd);
-
-              /* Decrypt the LUKS volume with the password */
-              ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
-              dfargs->counter++;
-              if(ret >= 0)
-                {
-                  /* We have a positive result */
-                  handle_signal(SIGUSR1); /* Print some stats */
-                  pthread_mutex_lock(&found_password_lock);
-                  found_password = 1;
-                  printf("Password found: %ls\n", password);
-                  stop = 1;
-                  pthread_mutex_unlock(&found_password_lock);
-                }
-              else if(ret < -1)
-                {
-                  fprintf(stderr, "Error: access to the LUKS volume denied.\n\n");
-                  stop = 1;
-                }
-
-              free(pwd);
-
-              if(len == 0)
-                break;
-              tab[0]++;
-              if(tab[0] == charset_len)
-                tab[0] = 0;
-              j = 0;
-              while((j < len) && (tab[j] == 0))
-                {
-                  j++;
-                  tab[j]++;
-                  if(tab[j] == charset_len)
-                    tab[j] = 0;
-                }
-            }
-          free(tab);
-          free(password);
-        }
+      fprintf(stderr, "Error: memory allocation failed.\n\n");
+      pthread_mutex_unlock(&get_password_lock);
+      exit(EXIT_FAILURE);
     }
+  }
 
-  crypt_free(cd);
+  /* Make password */
+  password_len = prefix_len + len + suffix_len;
+  password = (wchar_t *) calloc(password_len + 1, sizeof(wchar_t));
+  if((password == NULL))
+  {
+    fprintf(stderr, "Error: memory allocation failed.\n\n");
+    pthread_mutex_unlock(&get_password_lock);
+    exit(EXIT_FAILURE);
+  }
+  wcsncpy(password, prefix, prefix_len);
+  for(i = 0; i < len; i++)
+    password[prefix_len + i] = charset[tab[len - 1 - i]];
+  wcsncpy(password + prefix_len + len, suffix, suffix_len);
+  password[password_len] = '\0';
+  *pwd_len = wcstombs(NULL, password, 0);
+  *pwd = (unsigned char *) malloc(*pwd_len + 1);
+  if(*pwd == NULL)
+  {
+    fprintf(stderr, "Error: memory allocation failed.\n\n");
+    pthread_mutex_unlock(&get_password_lock);
+    exit(EXIT_FAILURE);
+  }
+  wcstombs(*pwd, password, *pwd_len + 1);
+  free(password);
+  snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", *pwd);
 
-  pthread_exit(NULL);
+  /* Prepare next password */
+  tab[0]++;
+  if(tab[0] == charset_len)
+    tab[0] = 0;
+  i = 0;
+  while((i < len) && (tab[i] == 0))
+  {
+    i++;
+    tab[i]++;
+    if(tab[i] == charset_len)
+      tab[i] = 0;
+  }
+  if(tab[len] != 0)
+  {
+    free(tab);
+    tab = NULL;
+    len++;
+  }
+
+  pthread_mutex_unlock(&get_password_lock);
+
+  return(1);
 }
 
 int read_dictionary_line(unsigned char **line, unsigned int *n)
@@ -222,59 +206,61 @@ int read_dictionary_line(unsigned char **line, unsigned int *n)
   size = 32;
   *line = (unsigned char *) malloc(size);
   if(*line == NULL)
-    {
-      fprintf(stderr, "Error: memory allocation failed.\n\n");
-      exit(EXIT_FAILURE);
-    }
+  {
+    fprintf(stderr, "Error: memory allocation failed.\n\n");
+    exit(EXIT_FAILURE);
+  }
 
-  pthread_mutex_lock(&dictionary_lock);
+  pthread_mutex_lock(&get_password_lock);
   while(1)
+  {
+    ret = fgetc(dictionary);
+    if(ret == EOF)
     {
-      ret = fgetc(dictionary);
-      if(ret == EOF)
-        {
-          if(*n == 0)
-            {
-              free(*line);
-              *line = NULL;
-              pthread_mutex_unlock(&dictionary_lock);
-              return(0);
-            }
-          else
-            break;
-        }
-
-      if((ret == '\r') || (ret == '\n'))
-        {
-          if(*n == 0)
-            continue;
-          else
-            break;
-        }
-
-      (*line)[*n] = (unsigned char) ret;
-      (*n)++;
-
-      if(*n == size)
-        {
-          size *= 2;
-          *line = (unsigned char *) realloc(*line, size);
-          if(*line == NULL)
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              pthread_mutex_unlock(&dictionary_lock);
-              exit(EXIT_FAILURE);
-            }
-        }
+      if(*n == 0)
+      {
+        free(*line);
+        *line = NULL;
+        pthread_mutex_unlock(&get_password_lock);
+        return(0);
+      }
+      else
+        break;
     }
-  pthread_mutex_unlock(&dictionary_lock);
+
+    if((ret == '\r') || (ret == '\n'))
+    {
+      if(*n == 0)
+        continue;
+      else
+        break;
+    }
+
+    (*line)[*n] = (unsigned char) ret;
+    (*n)++;
+
+    if(*n == size)
+    {
+      size *= 2;
+      *line = (unsigned char *) realloc(*line, size);
+      if(*line == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        pthread_mutex_unlock(&get_password_lock);
+        exit(EXIT_FAILURE);
+      }
+    }
+  }
 
   (*line)[*n] = '\0';
+  snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", *line);
+
+  pthread_mutex_unlock(&get_password_lock);
 
   return(1);
 }
 
-void * decryption_func_dictionary(void *arg)
+void * decryption_func(void *arg)
 {
   struct decryption_func_locals *dfargs;
   unsigned char *pwd;
@@ -287,35 +273,37 @@ void * decryption_func_dictionary(void *arg)
   /* Load the LUKS volume header */
   crypt_init(&cd, path);
   crypt_load(cd, CRYPT_LUKS1, NULL);
+  crypt_set_log_callback(cd, &logger, &ret);
 
   do
-    {
+  {
+    if(dictionary == NULL)
+      ret = generate_next_password(&pwd, &pwd_len);
+    else
       ret = read_dictionary_line(&pwd, &pwd_len);
-      if(ret == 0)
-        break;
-      snprintf(last_pass, LAST_PASS_MAX_SHOWN_LENGTH, "%s", pwd);
+    if(ret == 0)
+      break;
 
-      /* Decrypt the LUKS volume with the password */
-      ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
-      dfargs->counter++;
-      if(ret >= 0)
-        {
-          /* We have a positive result */
-          handle_signal(SIGUSR1); /* Print some stats */
-          pthread_mutex_lock(&found_password_lock);
-          found_password = 1;
-          printf("Password found: %s\n", pwd);
-          stop = 1;
-          pthread_mutex_unlock(&found_password_lock);
-        }
-      else if(ret < -1)
-        {
-          fprintf(stderr, "Error: access to the LUKS volume denied.\n\n");
-          stop = 1;
-        }
-
-      free(pwd);
+    /* Decrypt the LUKS volume with the password */
+    ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
+    dfargs->counter++;
+    if(ret >= 0)
+    {
+      /* We have a positive result */
+      handle_signal(SIGUSR1); /* Print some stats */
+      pthread_mutex_lock(&found_password_lock);
+      found_password = 1;
+      printf("Password found: %s\n", pwd);
+      stop = 1;
+      pthread_mutex_unlock(&found_password_lock);
     }
+    else if(ret < -1)
+    {
+      stop = 1;
+    }
+
+    free(pwd);
+  }
   while(stop == 0);
 
   crypt_free(cd);
@@ -339,10 +327,10 @@ int check_path(char *path)
 
   ret = crypt_load(cd, CRYPT_LUKS1, NULL);
   if(ret < 0)
-    {
-      crypt_free(cd);
-      return(0);
-    }
+  {
+    crypt_free(cd);
+    return(0);
+  }
 
   crypt_free(cd);
   return(1);
@@ -390,175 +378,170 @@ int main(int argc, char **argv)
   opterr = 0;
   while((c = getopt(argc, argv, "b:e:f:hl:m:s:t:")) != -1)
     switch(c)
+    {
+    case 'b':
+      prefix_len = mbstowcs(NULL, optarg, 0);
+      if(prefix_len == (unsigned int) -1)
+      {
+        fprintf(stderr, "Error: invalid character in prefix.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      prefix = (wchar_t *) calloc(prefix_len + 1, sizeof(wchar_t));
+      if(prefix == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(prefix, optarg, prefix_len + 1);
+      break;
+
+    case 'e':
+      suffix_len = mbstowcs(NULL, optarg, 0);
+      if(suffix_len == (unsigned int) -1)
+      {
+        fprintf(stderr, "Error: invalid character in suffix.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      suffix = (wchar_t *) calloc(suffix_len + 1, sizeof(wchar_t));
+      if(suffix == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(suffix, optarg, suffix_len + 1);
+      break;
+
+    case 'f':
+      dictionary = fopen(optarg, "r");
+      if(dictionary == NULL)
+      {
+        fprintf(stderr, "Error: can't open dictionary file.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      break;
+
+    case 'h':
+      usage(argv[0]);
+      exit(EXIT_FAILURE);
+      break;
+
+    case 'l':
+      min_len = (unsigned int) atoi(optarg);
+      break;
+
+    case 'm':
+      max_len = (unsigned int) atoi(optarg);
+      break;
+
+    case 's':
+      charset_len = mbstowcs(NULL, optarg, 0);
+      if(charset_len == 0)
+      {
+        fprintf(stderr, "Error: charset must have at least one character.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      if(charset_len == (unsigned int) -1)
+      {
+        fprintf(stderr, "Error: invalid character in charset.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      charset = (wchar_t *) calloc(charset_len + 1, sizeof(wchar_t));
+      if(charset == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(charset, optarg, charset_len + 1);
+      break;
+
+    case 't':
+      nb_threads = (unsigned int) atoi(optarg);
+      if(nb_threads == 0)
+        nb_threads = 1;
+      break;
+
+    default:
+      usage(argv[0]);
+      switch(optopt)
       {
       case 'b':
-        prefix_len = mbstowcs(NULL, optarg, 0);
-        if(prefix_len == (unsigned int) -1)
-          {
-            fprintf(stderr, "Error: invalid character in prefix.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        prefix = (wchar_t *) calloc(prefix_len + 1, sizeof(wchar_t));
-        if(prefix == NULL)
-          {
-            fprintf(stderr, "Error: memory allocation failed.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        mbstowcs(prefix, optarg, prefix_len + 1);
-        break;
-
       case 'e':
-        suffix_len = mbstowcs(NULL, optarg, 0);
-        if(suffix_len == (unsigned int) -1)
-          {
-            fprintf(stderr, "Error: invalid character in suffix.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        suffix = (wchar_t *) calloc(suffix_len + 1, sizeof(wchar_t));
-        if(suffix == NULL)
-          {
-            fprintf(stderr, "Error: memory allocation failed.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        mbstowcs(suffix, optarg, suffix_len + 1);
-        break;
-
       case 'f':
-        dictionary = fopen(optarg, "r");
-        if(dictionary == NULL)
-          {
-            fprintf(stderr, "Error: can't open dictionary file.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        break;
-
-      case 'h':
-        usage(argv[0]);
-        exit(EXIT_FAILURE);
-        break;
-
       case 'l':
-        min_len = (unsigned int) atoi(optarg);
-        break;
-
       case 'm':
-        max_len = (unsigned int) atoi(optarg);
-        break;
-
       case 's':
-        charset_len = mbstowcs(NULL, optarg, 0);
-        if(charset_len == 0)
-          {
-            fprintf(stderr, "Error: charset must have at least one character.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        if(charset_len == (unsigned int) -1)
-          {
-            fprintf(stderr, "Error: invalid character in charset.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        charset = (wchar_t *) calloc(charset_len + 1, sizeof(wchar_t));
-        if(charset == NULL)
-          {
-            fprintf(stderr, "Error: memory allocation failed.\n\n");
-            exit(EXIT_FAILURE);
-          }
-        mbstowcs(charset, optarg, charset_len + 1);
-        break;
-
       case 't':
-        nb_threads = (unsigned int) atoi(optarg);
-        if(nb_threads == 0)
-          nb_threads = 1;
+        fprintf(stderr, "Error: missing argument for option: '-%c'.\n\n", optopt);
         break;
 
       default:
-        usage(argv[0]);
-        switch(optopt)
-          {
-          case 'b':
-          case 'e':
-          case 'f':
-          case 'l':
-          case 'm':
-          case 's':
-          case 't':
-            fprintf(stderr, "Error: missing argument for option: '-%c'.\n\n", optopt);
-            break;
-
-          default:
-            fprintf(stderr, "Error: unknown option: '%c'.\n\n", optopt);
-            break;
-          }
-        exit(EXIT_FAILURE);
+        fprintf(stderr, "Error: unknown option: '%c'.\n\n", optopt);
         break;
       }
+      exit(EXIT_FAILURE);
+      break;
+    }
 
   if(optind >= argc)
-    {
-      usage(argv[0]);
-      fprintf(stderr, "Error: missing path to LUKS volume.\n\n");
-      exit(EXIT_FAILURE);
-    }
+  {
+    usage(argv[0]);
+    fprintf(stderr, "Error: missing path to LUKS volume.\n\n");
+    exit(EXIT_FAILURE);
+  }
 
   path = argv[optind];
 
   /* Check variables */
   if(dictionary != NULL)
-    {
-      fprintf(stderr, "Warning: using dictionary mode, ignoring options -b, -e, -l, -m and -s.\n\n");
-    }
+  {
+    fprintf(stderr, "Warning: using dictionary mode, ignoring options -b, -e, -l, -m and -s.\n\n");
+  }
   else
+  {
+    if(prefix == NULL)
     {
+      prefix_len = mbstowcs(NULL, "", 0);
+      prefix = (wchar_t *) calloc(prefix_len + 1, sizeof(wchar_t));
       if(prefix == NULL)
-        {
-          prefix_len = mbstowcs(NULL, "", 0);
-          prefix = (wchar_t *) calloc(prefix_len + 1, sizeof(wchar_t));
-          if(prefix == NULL)
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-          mbstowcs(prefix, "", prefix_len + 1);
-        }
-      if(suffix == NULL)
-        {
-          suffix_len = mbstowcs(NULL, "", 0);
-          suffix = (wchar_t *) calloc(suffix_len + 1, sizeof(wchar_t));
-          if(suffix == NULL)
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-          mbstowcs(suffix, "", suffix_len + 1);
-        }
-      if(charset == NULL)
-        {
-          charset_len = mbstowcs(NULL, default_charset, 0);
-          charset = (wchar_t *) calloc(charset_len + 1, sizeof(wchar_t));
-          if(charset == NULL)
-            {
-              fprintf(stderr, "Error: memory allocation failed.\n\n");
-              exit(EXIT_FAILURE);
-            }
-          mbstowcs(charset, default_charset, charset_len + 1);
-        }
-      if(nb_threads > charset_len)
-        {
-          fprintf(stderr, "Warning: number of threads (%u) bigger than character set length (%u). Only using %u threads.\n\n", nb_threads, charset_len, charset_len);
-          nb_threads = charset_len;
-        }
-      if(min_len < prefix_len + suffix_len + 1)
-        {
-          fprintf(stderr, "Warning: minimum length (%u) smaller than the length of specified password characters (%u). Setting minimum length to %u.\n\n", min_len, prefix_len + suffix_len, prefix_len + suffix_len + 1);
-          min_len = prefix_len + suffix_len + 1;
-        }
-      if(max_len < min_len)
-        {
-          fprintf(stderr, "Warning: maximum length (%u) smaller than minimum length (%u). Setting maximum length to %u.\n\n", max_len, min_len, min_len);
-          max_len = min_len;
-        }
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(prefix, "", prefix_len + 1);
     }
+    if(suffix == NULL)
+    {
+      suffix_len = mbstowcs(NULL, "", 0);
+      suffix = (wchar_t *) calloc(suffix_len + 1, sizeof(wchar_t));
+      if(suffix == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(suffix, "", suffix_len + 1);
+    }
+    if(charset == NULL)
+    {
+      charset_len = mbstowcs(NULL, default_charset, 0);
+      charset = (wchar_t *) calloc(charset_len + 1, sizeof(wchar_t));
+      if(charset == NULL)
+      {
+        fprintf(stderr, "Error: memory allocation failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+      mbstowcs(charset, default_charset, charset_len + 1);
+    }
+    if(min_len < prefix_len + suffix_len + 1)
+    {
+      fprintf(stderr, "Warning: minimum length (%u) smaller than the length of specified password characters (%u). Setting minimum length to %u.\n\n", min_len, prefix_len + suffix_len, prefix_len + suffix_len + 1);
+      min_len = prefix_len + suffix_len + 1;
+    }
+    if(max_len < min_len)
+    {
+      fprintf(stderr, "Warning: maximum length (%u) smaller than minimum length (%u). Setting maximum length to %u.\n\n", max_len, min_len, min_len);
+      max_len = min_len;
+    }
+  }
 
   last_pass[0] = '\0';
   signal(SIGUSR1, handle_signal);
@@ -566,59 +549,46 @@ int main(int argc, char **argv)
   /* Check if path points to a LUKS volume */
   ret = check_path(path);
   if(ret == 0)
-    {
-      fprintf(stderr, "Error: either %s is not a valid LUKS volume, or you don't have permission to access it.\n\n", path);
-      exit(EXIT_FAILURE);
-    }
+  {
+    fprintf(stderr, "Error: %s is not a valid LUKS volume, or you don't have permission to access it.\n\n", path);
+    exit(EXIT_FAILURE);
+  }
 
   pthread_mutex_init(&found_password_lock, NULL);
-  pthread_mutex_init(&dictionary_lock, NULL);
+  pthread_mutex_init(&get_password_lock, NULL);
 
   /* Start decryption threads. */
   decryption_threads = (pthread_t *) malloc(nb_threads * sizeof(pthread_t));
   thread_locals = (struct decryption_func_locals *) calloc(nb_threads, sizeof(struct decryption_func_locals));
   if((decryption_threads == NULL) || (thread_locals == NULL))
-    {
-      fprintf(stderr, "Error: memory allocation failed.\n\n");
-      exit(EXIT_FAILURE);
-    }
+  {
+    fprintf(stderr, "Error: memory allocation failed.\n\n");
+    exit(EXIT_FAILURE);
+  }
   start_time = time(NULL);
   for(i = 0; i < nb_threads; i++)
+  {
+    ret = pthread_create(&decryption_threads[i], NULL, &decryption_func, &thread_locals[i]);
+    if(ret != 0)
     {
-      if(dictionary == NULL)
-        {
-          thread_locals[i].index_start = i * (charset_len / nb_threads);
-          if(i == nb_threads - 1)
-            thread_locals[i].index_end = charset_len - 1;
-          else
-            thread_locals[i].index_end = (i + 1) * (charset_len / nb_threads) - 1;
-          ret = pthread_create(&decryption_threads[i], NULL, &decryption_func_bruteforce, &thread_locals[i]);
-        }
-      else
-        {
-          thread_locals[i].index_start = i;
-          ret = pthread_create(&decryption_threads[i], NULL, &decryption_func_dictionary, &thread_locals[i]);
-        }
-      if(ret != 0)
-        {
-          perror("Error: decryption thread");
-          exit(EXIT_FAILURE);
-        }
+      perror("Error: decryption thread");
+      exit(EXIT_FAILURE);
     }
+  }
 
   for(i = 0; i < nb_threads; i++)
-    {
-      pthread_join(decryption_threads[i], NULL);
-    }
+  {
+    pthread_join(decryption_threads[i], NULL);
+  }
   if(found_password == 0)
-    {
-      handle_signal(SIGUSR1); /* Print some stats */
-      fprintf(stderr, "Password not found\n");
-    }
+  {
+    handle_signal(SIGUSR1); /* Print some stats */
+    fprintf(stderr, "Password not found\n");
+  }
   free(thread_locals);
   free(decryption_threads);
   pthread_mutex_destroy(&found_password_lock);
-  pthread_mutex_destroy(&dictionary_lock);
+  pthread_mutex_destroy(&get_password_lock);
 
   exit(EXIT_SUCCESS);
 }
