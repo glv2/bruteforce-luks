@@ -26,6 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 #include <wchar.h>
@@ -45,6 +46,8 @@ char stop = 0, found_password = 0;
 unsigned int nb_threads = 1;
 unsigned char last_pass[LAST_PASS_MAX_SHOWN_LENGTH];
 time_t start_time;
+unsigned int status_interval = 0;
+struct itimerval timer;
 struct decryption_func_locals
 {
   unsigned long long int counter;
@@ -361,6 +364,7 @@ void usage(char *progname)
   fprintf(stderr, "                           VWXYZabcdefghijklmnopqrstuvwxyz\"\n");
   fprintf(stderr, "  -t <n>       Number of threads to use.\n");
   fprintf(stderr, "                 default: 1\n");
+  fprintf(stderr, "  -v <n>       Print progress info every n seconds.\n");
   fprintf(stderr, "\n");
   fprintf(stderr, "Sending a USR1 signal to a running bruteforce-luks process\n");
   fprintf(stderr, "makes it print progress info to standard error and continue.\n");
@@ -376,7 +380,7 @@ int main(int argc, char **argv)
 
   /* Get options and parameters. */
   opterr = 0;
-  while((c = getopt(argc, argv, "b:e:f:hl:m:s:t:")) != -1)
+  while((c = getopt(argc, argv, "b:e:f:hl:m:s:t:v:")) != -1)
     switch(c)
     {
     case 'b':
@@ -460,6 +464,10 @@ int main(int argc, char **argv)
         nb_threads = 1;
       break;
 
+    case 'v':
+      status_interval = (unsigned int) atoi(optarg);
+      break;
+
     default:
       usage(argv[0]);
       switch(optopt)
@@ -471,6 +479,7 @@ int main(int argc, char **argv)
       case 'm':
       case 's':
       case 't':
+      case 'v':
         fprintf(stderr, "Error: missing argument for option: '-%c'.\n\n", optopt);
         break;
 
@@ -544,7 +553,6 @@ int main(int argc, char **argv)
   }
 
   last_pass[0] = '\0';
-  signal(SIGUSR1, handle_signal);
 
   /* Check if path points to a LUKS volume */
   ret = check_path(path);
@@ -552,6 +560,17 @@ int main(int argc, char **argv)
   {
     fprintf(stderr, "Error: %s is not a valid LUKS volume, or you don't have permission to access it.\n\n", path);
     exit(EXIT_FAILURE);
+  }
+
+  signal(SIGUSR1, handle_signal);
+  if(status_interval > 0)
+  {
+    signal(SIGALRM, handle_signal);
+    timer.it_value.tv_sec = status_interval;
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = status_interval;
+    timer.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &timer, NULL);
   }
 
   pthread_mutex_init(&found_password_lock, NULL);
