@@ -64,6 +64,10 @@ Default: 1
 .TP
 .B -v <n>
 Print progress info every n seconds.
+.TP
+.B -w <file>
+Restore the state of a previous session if the file exists,
+then write the state to the file regularly (~ every minute).
 .SH EXAMPLES
 Try to find the password of a LUKS encrypted volume using 4 threads, trying
 only passwords with 5 characters:
@@ -105,3 +109,17 @@ Print progress info:
 .sp
 .nf
     pkill -USR1 -f bruteforce-luks
+.P
+.fi
+Print progress info every 30 seconds:
+.sp
+.nf
+    bruteforce-luks -t 6 -f dictionary.txt -v 30 /dev/sdd1
+.P
+.fi
+Save/restore state between sessions:
+.sp
+.nf
+    bruteforce-luks -t 6 -f dictionary.txt -w state.txt /dev/sdd1
+      (Let the program run for a few minutes and stop it)
+    bruteforce-luks -t 6 -w state.txt /dev/sdd1

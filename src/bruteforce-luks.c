@@ -37,7 +37,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #define LAST_PASS_MAX_SHOWN_LENGTH 256
 
 unsigned char *default_charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-unsigned char *path = NULL;
+unsigned char *path = NULL, *dictionary_file = NULL, *state_file = NULL;
 wchar_t *charset = NULL, *prefix = NULL, *suffix = NULL;
 unsigned int charset_len, min_len = 1, max_len = 8, prefix_len = 0, suffix_len = 0;
 FILE *dictionary = NULL;
@@ -47,11 +47,13 @@ unsigned int nb_threads = 1;
 unsigned char last_pass[LAST_PASS_MAX_SHOWN_LENGTH];
 time_t start_time;
 unsigned int status_interval = 0;
-struct itimerval timer;
+struct itimerval progress_timer, state_timer;
 struct decryption_func_locals
 {
   unsigned long long int counter;
 } *thread_locals;
+unsigned int len = 0;
+unsigned int *tab = NULL;
 
 
 /*
@@ -128,8 +130,6 @@ int generate_next_password(unsigned char **pwd, unsigned int *pwd_len)
 {
   wchar_t *password;
   unsigned int password_len, i;
-  static unsigned int len = 0;
-  static unsigned int *tab = NULL;
 
   pthread_mutex_lock(&get_password_lock);
 
@@ -316,6 +316,200 @@ void * decryption_func(void *arg)
 
 
 /*
+ * Save/restore state
+ */
+
+void save_state(int signo)
+{
+  unsigned int i;
+  unsigned long long int total_ops = 0;
+  unsigned long long int run_time = time(NULL) - start_time;
+  FILE *state = fopen(state_file, "w+");
+
+  if(state == NULL)
+  {
+    fprintf(stderr, "Error: can't open state file.\n\n");
+    return;
+  }
+
+  for(i = 0; i < nb_threads; i++)
+    total_ops += thread_locals[i].counter;
+
+  if(dictionary == NULL)
+  {
+    fprintf(state, "luks %s\n", path);
+    fprintf(state, "time %llu\n", run_time);
+    fprintf(state, "bruteforce %u %u\n", min_len, max_len);
+    fprintf(state, "charset %ls\n", charset);
+    fprintf(state, "prefix %ls\n", prefix);
+    fprintf(state, "suffix %ls\n", suffix);
+    fprintf(state, "%llu\n", total_ops);
+    fprintf(state, "%u\n", len);
+    for(i = 0; i < len; i++)
+      fprintf(state, "%u ", tab[i]);
+    fprintf(state, "\n");
+  }
+  else
+  {
+    fprintf(state, "luks %s\n", path);
+    fprintf(state, "time %llu\n", run_time);
+    fprintf(state, "dictionary %s\n", dictionary_file);
+    fprintf(state, "%llu\n", total_ops);
+  }
+
+  fclose(state);
+}
+
+void restore_state()
+{
+  unsigned int i, n;
+  unsigned long long int total_ops = 0;
+  unsigned long long int run_time;
+  unsigned char *line;
+  FILE *state = fopen(state_file, "r");
+
+  if(state == NULL)
+  {
+    fprintf(stderr, "Warning: can't open state file, state not restored.\n\n");
+    return;
+  }
+
+  if(dictionary != NULL)
+    fclose(dictionary);
+
+  if((fscanf(state, "luks %ms\n", &line) != 1)
+     || (fscanf(state, "time %llu\n", &run_time) != 1))
+  {
+    fprintf(stderr, "Error: parsing the state file failed.\n\n");
+    exit(EXIT_FAILURE);
+  }
+  free(line);
+  start_time = time(NULL) - run_time;
+
+  if(fscanf(state, "bruteforce %u %u\n", &min_len, &max_len) == 2)
+  {
+    dictionary = state;
+
+    if((read_dictionary_line(&line, &n) == 0) || (n < 8))
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    charset_len = mbstowcs(NULL, line + 8, 0);
+    if(charset_len == 0)
+    {
+      fprintf(stderr, "Error: charset must have at least one character.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    if(charset_len == (unsigned int) -1)
+    {
+      fprintf(stderr, "Error: invalid character in charset.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    charset = (wchar_t *) calloc(charset_len + 1, sizeof(wchar_t));
+    if(charset == NULL)
+    {
+      fprintf(stderr, "Error: memory allocation failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    mbstowcs(charset, line + 8, charset_len + 1);
+
+    if((read_dictionary_line(&line, &n) == 0) || (n < 7))
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    prefix_len = mbstowcs(NULL, line + 7, 0);
+    if(prefix_len == (unsigned int) -1)
+    {
+      fprintf(stderr, "Error: invalid character in prefix.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    prefix = (wchar_t *) calloc(prefix_len + 1, sizeof(wchar_t));
+    if(prefix == NULL)
+    {
+      fprintf(stderr, "Error: memory allocation failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    mbstowcs(prefix, line + 7, prefix_len + 1);
+
+    if((read_dictionary_line(&line, &n) == 0) || (n < 7))
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    suffix_len = mbstowcs(NULL, line + 7, 0);
+    if(suffix_len == (unsigned int) -1)
+    {
+      fprintf(stderr, "Error: invalid character in suffix.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    suffix = (wchar_t *) calloc(suffix_len + 1, sizeof(wchar_t));
+    if(suffix == NULL)
+    {
+      fprintf(stderr, "Error: memory allocation failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    mbstowcs(suffix, line + 7, suffix_len + 1);
+
+    dictionary = NULL;
+
+    if(fscanf(state, "%llu\n", &total_ops) != 1)
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    thread_locals[0].counter = total_ops;
+
+    if(fscanf(state, "%u\n", &len) != 1)
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+
+    tab = (unsigned int *) calloc(len + 1, sizeof(unsigned int));
+    if(tab == NULL)
+    {
+      fprintf(stderr, "Error: memory allocation failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    for(i = 0; i < len; i++)
+      if(fscanf(state, "%u ", &tab[i]) != 1)
+      {
+        fprintf(stderr, "Error: parsing the state file failed.\n\n");
+        exit(EXIT_FAILURE);
+      }
+  }
+  else if(fscanf(state, "dictionary %ms\n", &dictionary_file) == 1)
+  {
+    if(fscanf(state, "%llu\n", &total_ops) != 1)
+    {
+      fprintf(stderr, "Error: parsing the state file failed.\n\n");
+      exit(EXIT_FAILURE);
+    }
+    thread_locals[0].counter = total_ops;
+
+    dictionary = fopen(dictionary_file, "r");
+    if(dictionary == NULL)
+    {
+      fprintf(stderr, "Error: can't open dictionary file.\n\n");
+      exit(EXIT_FAILURE);
+    }
+
+    for(i = 0; i < total_ops; i++)
+      read_dictionary_line(&line, &n);
+  }
+  else
+  {
+    fprintf(stderr, "Error: parsing the state file failed.\n\n");
+    exit(EXIT_FAILURE);
+  }
+
+  fclose(state);
+}
+
+
+/*
  * Check path
  */
 
@@ -365,6 +559,8 @@ void usage(char *progname)
   fprintf(stderr, "  -t <n>       Number of threads to use.\n");
   fprintf(stderr, "                 default: 1\n");
   fprintf(stderr, "  -v <n>       Print progress info every n seconds.\n");
+  fprintf(stderr, "  -w <file>    Restore the state of a previous session if the file exists,\n");
+  fprintf(stderr, "               then write the state to the file regularly (~ every minute).\n");
   fprintf(stderr, "\n");
   fprintf(stderr, "Sending a USR1 signal to a running bruteforce-luks process\n");
   fprintf(stderr, "makes it print progress info to standard error and continue.\n");
@@ -380,7 +576,7 @@ int main(int argc, char **argv)
 
   /* Get options and parameters. */
   opterr = 0;
-  while((c = getopt(argc, argv, "b:e:f:hl:m:s:t:v:")) != -1)
+  while((c = getopt(argc, argv, "b:e:f:hl:m:s:t:v:w:")) != -1)
     switch(c)
     {
     case 'b':
@@ -416,7 +612,8 @@ int main(int argc, char **argv)
       break;
 
     case 'f':
-      dictionary = fopen(optarg, "r");
+      dictionary_file = optarg;
+      dictionary = fopen(dictionary_file, "r");
       if(dictionary == NULL)
       {
         fprintf(stderr, "Error: can't open dictionary file.\n\n");
@@ -466,6 +663,10 @@ int main(int argc, char **argv)
 
     case 'v':
       status_interval = (unsigned int) atoi(optarg);
+      break;
+
+    case 'w':
+      state_file = optarg;
       break;
 
     default:
@@ -566,17 +767,16 @@ int main(int argc, char **argv)
   if(status_interval > 0)
   {
     signal(SIGALRM, handle_signal);
-    timer.it_value.tv_sec = status_interval;
-    timer.it_value.tv_usec = 0;
-    timer.it_interval.tv_sec = status_interval;
-    timer.it_interval.tv_usec = 0;
-    setitimer(ITIMER_REAL, &timer, NULL);
+    progress_timer.it_value.tv_sec = status_interval;
+    progress_timer.it_value.tv_usec = 0;
+    progress_timer.it_interval.tv_sec = status_interval;
+    progress_timer.it_interval.tv_usec = 0;
+    setitimer(ITIMER_REAL, &progress_timer, NULL);
   }
 
   pthread_mutex_init(&found_password_lock, NULL);
   pthread_mutex_init(&get_password_lock, NULL);
 
-  /* Start decryption threads. */
   decryption_threads = (pthread_t *) malloc(nb_threads * sizeof(pthread_t));
   thread_locals = (struct decryption_func_locals *) calloc(nb_threads, sizeof(struct decryption_func_locals));
   if((decryption_threads == NULL) || (thread_locals == NULL))
@@ -584,7 +784,24 @@ int main(int argc, char **argv)
     fprintf(stderr, "Error: memory allocation failed.\n\n");
     exit(EXIT_FAILURE);
   }
+
   start_time = time(NULL);
+
+  if(state_file != NULL)
+  {
+    fprintf(stderr, "Warning: restoring state, ignoring options -b, -e, -f, -l, -m and -s.\n\n");
+
+    restore_state();
+
+    signal(SIGVTALRM, save_state);
+    state_timer.it_value.tv_sec = 60 * nb_threads;
+    state_timer.it_value.tv_usec = 0;
+    state_timer.it_interval.tv_sec = 60 * nb_threads;
+    state_timer.it_interval.tv_usec = 0;
+    setitimer(ITIMER_VIRTUAL, &state_timer, NULL);
+  }
+
+  /* Start decryption threads. */
   for(i = 0; i < nb_threads; i++)
   {
     ret = pthread_create(&decryption_threads[i], NULL, &decryption_func, &thread_locals[i]);

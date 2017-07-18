@@ -1,6 +1,7 @@
 Version 1.3.0
   2017-00-00
   Add option to print progress info regularly.
+  Add option to restore/save state from/to a file.
 
 Version 1.2.2
   2016-11-27

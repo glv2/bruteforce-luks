@@ -49,8 +49,8 @@ The program requires the cryptsetup library.
 Install the dependencies. For example on a GNU/Linux Debian-like system, enter
 the commands:
 
-    sudo apt-get install dh-autoreconf
-    sudo apt-get install libcryptsetup-dev
+    sudo apt install dh-autoreconf
+    sudo apt install libcryptsetup-dev
 
 
 If you are building from the raw sources, you must first generate the
@@ -106,6 +106,18 @@ of the LUKS volume to a file and pass this file to the program:
 Print progress info:
 
     pkill -USR1 -f bruteforce-luks
+
+
+Print progress info every 30 seconds:
+
+    bruteforce-luks -t 6 -f dictionary.txt -v 30 /dev/sdd1
+
+
+Save/restore state between sessions:
+
+    bruteforce-luks -t 6 -f dictionary.txt -w state.txt /dev/sdd1
+      (Let the program run for a few minutes and stop it)
+    bruteforce-luks -t 6 -w state.txt /dev/sdd1
 
 
 ## Donations
