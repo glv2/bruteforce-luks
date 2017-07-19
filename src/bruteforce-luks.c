@@ -289,7 +289,6 @@ void * decryption_func(void *arg)
 
     /* Decrypt the LUKS volume with the password */
     ret = crypt_activate_by_passphrase(cd, NULL, CRYPT_ANY_SLOT, pwd, pwd_len, CRYPT_ACTIVATE_READONLY);
-    dfargs->counter++;
     if(ret >= 0)
     {
       /* We have a positive result */
@@ -300,10 +299,7 @@ void * decryption_func(void *arg)
       stop = 1;
       pthread_mutex_unlock(&found_password_lock);
     }
-    else if(ret < -1)
-    {
-      stop = 1;
-    }
+    dfargs->counter++;
 
     free(pwd);
   }
@@ -681,6 +677,7 @@ int main(int argc, char **argv)
       case 's':
       case 't':
       case 'v':
+      case 'w':
         fprintf(stderr, "Error: missing argument for option: '-%c'.\n\n", optopt);
         break;
 
