@@ -69,6 +69,7 @@ void handle_signal(int signo)
   double space = 0;
   double pw_per_seconds;
   time_t current_time, eta_time;
+  struct tm *time_info;
   char datestr[256];
 
   current_time = time(NULL);
@@ -101,8 +102,11 @@ void handle_signal(int signo)
     }
     else
     {
-      strftime(datestr, 256, "%c", localtime(&eta_time));
-      fprintf(stderr, "ETA: %s\n", datestr);
+      time_info = localtime(&eta_time);
+      if(time_info && (strftime(datestr, 256, "%c", time_info) > 0))
+        fprintf(stderr, "ETA: %s\n", datestr);
+      else
+        fprintf(stderr, "ETA: %ld s\n", eta_time - start_time);
     }
   }
   fprintf(stderr, "\n");
