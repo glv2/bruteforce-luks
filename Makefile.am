@@ -1,4 +1,4 @@
-AUTOMAKE_OPTIONS = subdir-objects
+AUTOMAKE_OPTIONS = subdir-objects dist-lzip
 bin_PROGRAMS = bruteforce-luks
 bruteforce_luks_SOURCES = src/bruteforce-luks.c src/version.h
-man_MANS = doc/bruteforce-luks.1
+dist_man_MANS = doc/bruteforce-luks.1
