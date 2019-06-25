@@ -52,7 +52,7 @@ the commands:
     sudo apt install dh-autoreconf
     sudo apt install libcryptsetup-dev
 
-For Fedora, enter the commands>
+For Fedora, enter the commands:
 
     sudo dnf install dh-autoreconf
     sudo dnf install cryptsetup-devel
