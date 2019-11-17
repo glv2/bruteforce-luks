@@ -34,6 +34,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "version.h"
 
 
+#ifndef CRYPT_LUKS
+/* Passing NULL to crypt_load will default to LUKS1 on older libcryptsetup versions. */
+#define CRYPT_LUKS NULL
+#endif
+
 #define LAST_PASS_MAX_SHOWN_LENGTH 256
 
 unsigned char *default_charset = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -282,7 +287,7 @@ void * decryption_func(void *arg)
 
   /* Load the LUKS volume header */
   crypt_init(&cd, path);
-  crypt_load(cd, CRYPT_LUKS1, NULL);
+  crypt_load(cd, CRYPT_LUKS, NULL);
   crypt_set_log_callback(cd, &logger, &ret);
 
   do
@@ -527,7 +532,7 @@ int check_path(char *path)
   if(ret < 0)
     return(0);
 
-  ret = crypt_load(cd, CRYPT_LUKS1, NULL);
+  ret = crypt_load(cd, CRYPT_LUKS, NULL);
   if(ret < 0)
   {
     crypt_free(cd);
