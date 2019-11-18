@@ -1,3 +1,7 @@
+2019-11-18 Guillaume LE VAILLANT <glv@posteo.net>
+	Version 1.4.0
+	Add support for LUKS2 volumes.
+
 2019-05-21 Guillaume LE VAILLANT <glv@posteo.net>
 	Version 1.3.2
 	Fix possible segmentation fault.

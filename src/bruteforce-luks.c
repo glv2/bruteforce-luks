@@ -1,7 +1,7 @@
 /*
 Bruteforce a LUKS volume.
 
-Copyright 2014-2017 Guillaume LE VAILLANT
+Copyright 2014-2019 Guillaume LE VAILLANT
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
