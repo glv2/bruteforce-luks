@@ -69,6 +69,11 @@ Then, build the program with the commands:
     make
 
 
+You can run the tests to check if things work correctly with:
+
+    make check
+
+
 To install it on your system, use the command:
 
     make install
