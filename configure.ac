@@ -28,5 +28,5 @@ AC_CHECK_HEADERS(pthread.h, [], AC_MSG_ERROR([POSIX threads headers required]))
 AC_CHECK_LIB(cryptsetup, crypt_activate_by_passphrase, [], AC_MSG_ERROR([cryptsetup library required]))
 AC_CHECK_HEADERS(libcryptsetup.h, [], AC_MSG_ERROR([cryptsetup headers required]))
 
-AC_CONFIG_FILES(Makefile)
+AC_CONFIG_FILES(Makefile tests/Makefile)
 AC_OUTPUT

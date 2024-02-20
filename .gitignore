@@ -12,4 +12,17 @@ install-sh
 Makefile
 Makefile.in
 missing
+test-driver
+test-driver
+test-suite.log
+tests/crack-volume1.sh.log
+tests/crack-volume1.sh.trs
+tests/crack-volume2.sh.log
+tests/crack-volume2.sh.trs
+tests/crack-volume3.sh.log
+tests/crack-volume3.sh.trs
+tests/volume1.img
+tests/volume2.img
+tests/volume3.img
 src/*.o
+*~
