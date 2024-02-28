@@ -16,8 +16,9 @@ AC_CHECK_FUNCS([fopen fgetc])
 AC_CHECK_FUNCS([atoi])
 AC_CHECK_FUNCS([setlocale mbstowcs wcsncpy wcstombs])
 AC_CHECK_FUNCS([getopt])
+AC_CHECK_FUNCS([sleep])
 AC_CHECK_FUNCS([signal])
-AC_CHECK_FUNCS([localtime setitimer strftime time])
+AC_CHECK_FUNCS([localtime strftime time])
 
 dnl Check for libraries
 AC_CHECK_LIB(m, pow, [], AC_MSG_ERROR([math library required]))
