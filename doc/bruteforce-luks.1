@@ -1,4 +1,4 @@
-.TH BRUTEFORCE-LUKS "1" "November 2019" "BRUTEFORCE-LUKS 1.4.0" "Bruteforce LUKS encrypted volume"
+.TH BRUTEFORCE-LUKS "1" "March 2024" "BRUTEFORCE-LUKS 1.4.1" "Bruteforce LUKS encrypted volume"
 .SH NAME
 bruteforce-luks - try to find the password of a LUKS volume
 .SH SYNOPSIS
@@ -101,7 +101,8 @@ Instead of passing a block device to the program, you can copy the beginning
 of the LUKS volume to a file and pass this file to the program:
 .sp
 .nf
-    sudo dd if=/dev/sda1 of=/tmp/luks-header bs=1M count=10
+    sudo cryptsetup luksHeaderBackup --header-backup-file /tmp/luks-header /dev/sda1
+    sudo chown $USER /tmp/luks-header
     bruteforce-luks -t 4 -l 5 -m 5 /tmp/luks-header
 .P
 .fi

@@ -1,3 +1,7 @@
+Version 1.4.1
+  2024-03-01
+  Fix some possible deadlock and race condition.
+
 Version 1.4.0
   2019-11-18
   Add support for LUKS2 volumes.
